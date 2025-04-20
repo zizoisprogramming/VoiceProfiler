@@ -37,6 +37,7 @@ class LMTNode:
         self.switched_split = False ## if split model performs better than base model take it
         self.is_leaf = False
         self.split_value = None
+        self.classes = None
 class LinearModelTree(BaseEstimator, ClassifierMixin):
     def __init__(self, base_model, split_policy = 'Gain', split_model = None, max_depth = 5, min_samples_leaf = 5, min_samples_split = 10):
         self.base_model = base_model
@@ -47,10 +48,11 @@ class LinearModelTree(BaseEstimator, ClassifierMixin):
             self.split_model = None
         else:
             self.split_policy = 'Accuracy'
-            self.split_model = clone(split_model)
+            self.split_model = split_model
         self.max_depth = max_depth
         self.min_samples_leaf = min_samples_leaf
         self.min_samples_split = min_samples_split
+        self.num_classes = 0
     def _accuracy_gain(self, X, y, left_mask, right_mask):
         if left_mask.sum() == 0 or right_mask.sum() == 0:
             return -np.inf, None, None  # invalid split
@@ -83,11 +85,10 @@ class LinearModelTree(BaseEstimator, ClassifierMixin):
     def _get_thresholds(self, X, feature_index):
         feature_data = X[:, feature_index]
         unique_values = np.unique(feature_data)
-        return unique_values
         if len(unique_values) <= 100:
             thresholds = unique_values
         else:
-            percentiles = np.linspace(1, 100, 100)
+            percentiles = np.linspace(1, 100, 10)
             thresholds = np.percentile(feature_data, percentiles)
             thresholds = np.unique(thresholds)
         return thresholds
@@ -98,6 +99,7 @@ class LinearModelTree(BaseEstimator, ClassifierMixin):
                 len(np.unique(y)) == 1 or
                 len(y) < self.min_samples_split):
             node.is_leaf = True
+            node.classes = np.unique(y)
             if(len(np.unique(y)) == 1):
                 node.model = None
                 node.result = y[0]
@@ -167,6 +169,7 @@ class LinearModelTree(BaseEstimator, ClassifierMixin):
         return node
     def fit(self, X, y):
         self.root = self._fit_node(X, y, 0)
+        self.num_classes = len(np.unique(y))
         return self
     def _predict_node(self, node, x):
         if node.is_leaf:
@@ -177,6 +180,23 @@ class LinearModelTree(BaseEstimator, ClassifierMixin):
             return self._predict_node(node.left, x)
         else:
             return self._predict_node(node.right, x)
+    def _proba_node(self, node, x):
+        if node.is_leaf:
+            if node.model is None:
+                result = np.zeros(self.num_classes)
+                result[node.result] = 1
+                return result
+            ## some classes may not exist
+            probabilities_total = np.zeros(self.num_classes)
+            probabilities_total[node.classes] = node.model.predict_proba([x])[0]
+            return probabilities_total
+        if x[node.split_rule] <= node.split_value:
+            return self._proba_node(node.left, x)
+        else:
+            return self._proba_node(node.right, x)
+
+    def predict_proba(self, X):
+        return np.array([self._proba_node(self.root, x) for x in X])
     def predict(self, X):
         return np.array([self._predict_node(self.root, x) for x in X])
     def score(self, X, y):
@@ -196,7 +216,7 @@ def try_class():
                                n_classes=7, random_state=42)
     X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y)
 
-    model = LinearModelTree(base_model=LogisticRegression(max_iter=300), split_policy = 'Accuracy', split_model=KNeighborsClassifier(n_neighbors=2), max_depth=5, min_samples_leaf=5, min_samples_split=10)
+    model = LinearModelTree(base_model=KNeighborsClassifier(n_neighbors=1), split_policy = 'Gain', split_model=KNeighborsClassifier(n_neighbors=1), max_depth=2, min_samples_leaf=5, min_samples_split=10)
     curr_time = time()
     model.fit(X_train, y_train)
     print ("TLM RESULTS")
@@ -218,4 +238,4 @@ def try_class():
     print("Training acc:", model.score(X_train, y_train))
     print("Accuracy:", model.score(X_test, y_test))
     print("Total Time for the rest " + str(time() - curr_time))
-try_class()
+#try_class()
