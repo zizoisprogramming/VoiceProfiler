@@ -12,6 +12,7 @@ import parselmouth
 import numpy as np
 import os
 from tqdm import tqdm
+import csv
 
 # voice activity mask - to keep only voiced parts (step 1 preprocessing) ---lw el sot waty awy by3tbro unvoiced?
 
@@ -214,16 +215,14 @@ def calculate_wps(duration, row):
 def calculate_f0_features(y, sr):
     y_harmonic, _ = librosa.effects.hpss(y)
     # Estimate fundamental frequency (f0) using pyin
-    f0, voiced_flag, _ = librosa.pyin(y_harmonic, fmin=librosa.note_to_hz('C1'), fmax=librosa.note_to_hz('C8'))
-
-    # Handle NaNs by interpolating the missing values [3ashan el graph byebaa discontinuous]
-    f0_interpolated = np.interp(np.arange(len(f0)), np.where(~np.isnan(f0))[0], f0[~np.isnan(f0)])
+    f0, voiced_flag, voiced_probs = librosa.pyin(y, fmin=librosa.note_to_hz('C1'), fmax=librosa.note_to_hz('C8'))
+    f0_clean = f0[~np.isnan(f0)]
 
     # Compute features
-    f0_mean = np.mean(f0_interpolated)
-    f0_std = np.std(f0_interpolated)
-    f0_5_percentile = np.percentile(f0_interpolated, 5)
-    f0_95_percentile = np.percentile(f0_interpolated, 95)
+    f0_mean = np.mean(f0_clean)
+    f0_std = np.std(f0_clean)
+    f0_5_percentile = np.percentile(f0_clean, 5)
+    f0_95_percentile = np.percentile(f0_clean, 95)
 
     return {
         'mean': f0_mean,
@@ -362,8 +361,8 @@ def filter_data(df):
     df_filtered = df[(df['down_votes'] == 0) & (df['duration'] > duration_threshold)]
 
     # Step 3: Sample 1000 males and 1000 females
-    df_male = df_filtered[df_filtered['gender'] == 'male'].sample(n=1000, random_state=42)
-    df_female = df_filtered[df_filtered['gender'] == 'female'].sample(n=1000, random_state=42)
+    df_male = df_filtered[df_filtered['gender'] == 'male'].sample(n=1500, random_state=42)
+    df_female = df_filtered[df_filtered['gender'] == 'female'].sample(n=1500, random_state=42)
 
     # Combine the two
     df_final = pd.concat([df_male, df_female]).reset_index(drop=True)
@@ -402,33 +401,43 @@ def preprocess_audio_batch(df_final):
     df_filtered['windowed_frames'] = windowed_frames
     df_filtered['denoised_audios'] = denoised_audios
     return df_filtered
+
+
 def extract_features(df_filtered):
-    # extract features from the filtered dataset
-    features_list = []
-    for i in tqdm(range(len(df_filtered)), desc="Extracting features"):
-        y = df_filtered['y'].iloc[i]
-        sr = df_filtered['sr'].iloc[i]
+    output_file = 'extracted_features_2k.csv'
+    header_written = False
 
-        if y is not None and sr is not None:
-            features = extract_features_from_audio(y, sr, df_filtered.iloc[i], df_filtered["windowed_frames"].iloc[i])
-            features['gender'] = df_filtered['gender'].iloc[i]
-            features['age'] = df_filtered['age'].iloc[i]
-            features_list.append(features)
-        else:
-            features_list.append(None)
+    with open(output_file, mode='w', newline='') as file:
+        writer = None
 
-    features_list = [f for f in features_list if f is not None] # filter out None values
+        for i in tqdm(range(len(df_filtered)), desc="Extracting features"):
+            y = df_filtered['y'].iloc[i]
+            sr = df_filtered['sr'].iloc[i]
 
-    #save to csv
-    features_df = pd.DataFrame(features_list)
-    features_df.to_csv('extracted_features.csv', index=False)
-    return features_df
+            if y is not None and sr is not None:
+                features = extract_features_from_audio(
+                    y, sr,
+                    df_filtered.iloc[i],
+                    df_filtered["windowed_frames"].iloc[i]
+                )
+                features['gender'] = df_filtered['gender'].iloc[i]
+                features['age'] = df_filtered['age'].iloc[i]
+
+                if not header_written:
+                    writer = csv.DictWriter(file, fieldnames=features.keys())
+                    writer.writeheader()
+                    header_written = True
+
+                writer.writerow(features)
+
+    print(f"Saved features to {output_file}")
+
 
 # main
 def main():
     # Define file paths
     file_path = "filtered_data_labeled.tsv"
-    audio_dir = "F:/NN project/audio_batch_1"
+    audio_dir = "F:/NN project/audio_batch_8"
 
     # Step 1: Read data
     df = read_data(file_path, audio_dir)
