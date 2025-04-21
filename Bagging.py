@@ -2,10 +2,13 @@ import numpy as np
 import math
 from sklearn.base import clone
 from scipy.stats import mode
+from sklearn.base import BaseEstimator, ClassifierMixin
 
-class Bagging:
+
+class Bagging(BaseEstimator, ClassifierMixin):
     def __init__(self, model, n_estimators=100, max_samples=1.0, random_state=None):
         # Hyperparameters
+        self.model = model                # the model to be used
         self.n_estimators = n_estimators    # the number of estimators (i.e., T)
         self.max_samples = max_samples      # the ratio determining the size of the bootstrap samples D_1, D_2,..,D_T
         
