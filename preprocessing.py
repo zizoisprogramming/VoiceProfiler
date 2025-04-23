@@ -13,6 +13,7 @@ import numpy as np
 import os
 from tqdm import tqdm
 import csv
+import noisereduce as nr
 
 # voice activity mask - to keep only voiced parts (step 1 preprocessing) ---lw el sot waty awy by3tbro unvoiced?
 
@@ -54,6 +55,9 @@ def wavelet_denoise(signal, wavelet='db8', level=4, threshold_scale=0.04):
     ]
     return pywt.waverec(denoised_coeffs, wavelet)
 
+def denoise(signal,sr):
+    return nr.reduce_noise(y=signal, sr=sr)
+
 # Pre-emphasis (step 3 preprocessing) enhancing the SNR. less used in speech recognition processing. --n4elha?
 
 def pre_emphasis(signal, coeff=0.97):
@@ -80,7 +84,7 @@ def preprocess_audio(raw_audio, sr, frame_length, hop_length):
         return None, None, None
 
     # Step 2: Denoising
-    denoised_audio = wavelet_denoise(speech_signal)
+    denoised_audio = denoise(speech_signal, sr)
 
     # Step 3: Pre-emphasis
     y_preemphasized = pre_emphasis(denoised_audio)
@@ -150,7 +154,7 @@ def calculate_mfcc(denoised_audio, sr):
     }
 
 # Assume windowed_frames already exists from your framing+windowing step
-def calculate_pitch_and_cepstrum(windowed_frames):
+def calculate_pitch_and_cepstrum(windowed_frames,sr):
     mid_frame_idx = windowed_frames.shape[1] // 2
     windowed_frame = windowed_frames[:, mid_frame_idx]
 
@@ -230,6 +234,42 @@ def calculate_f0_features(y, sr):
         '5_percentile': f0_5_percentile,
         '95_percentile': f0_95_percentile
     }
+
+def extract_f0_percentiles(windowed_frames, sr):
+    f0_values = []
+
+    for i in range(windowed_frames.shape[1]):
+        frame = windowed_frames[:, i]
+        spectrum = np.fft.fft(frame)
+        log_magnitude = np.log(np.abs(spectrum) + 1e-10)
+        cepstrum = np.fft.ifft(log_magnitude).real
+
+        min_q = int(sr / 400)
+        max_q = int(sr / 60)
+
+        quef_peak = np.argmax(cepstrum[min_q:max_q]) + min_q
+        pitch_period = quef_peak / sr
+        f0 = 1.0 / pitch_period
+
+        # Filter unrealistic F0s (optional)
+        if 60 <= f0 <= 400:  # Human voice range
+            f0_values.append(f0)
+
+    if len(f0_values) == 0:
+        return None, None, []
+
+    f0_values = np.array(f0_values)
+    f0_mean = np.mean(f0_values)
+    f0_std = np.std(f0_values)
+    f0_5 = np.percentile(f0_values, 5)
+    f0_95 = np.percentile(f0_values, 95)
+
+    return {
+        'mean': f0_mean,
+        'std': f0_std,
+        '5_percentile': f0_5,
+        '95_percentile': f0_95
+    }
 def calculate_tempo(y, sr, duration):
     # Compute the onset envelope
     onset_env = librosa.onset.onset_strength(y=y, sr=sr)
@@ -265,7 +305,8 @@ def extract_features_from_audio(y, sr, row, win_frames):
     features['wps'] = calculate_wps(duration, row)  
 
     # F0
-    f0_features = calculate_f0_features(y, sr)
+    # f0_features = calculate_f0_features(y, sr)
+    f0_features = extract_f0_percentiles(windowed_frames=win_frames, sr=sr)
     features['f0_mean'] = f0_features['mean']
     features['f0_std'] = f0_features['std']
     features['f0_5_percentile'] = f0_features['5_percentile']
@@ -358,15 +399,17 @@ def load_audios(df):
     return df
 def filter_data(df):
     duration_threshold = 2.0  
-    df_filtered = df[(df['down_votes'] == 0) & (df['duration'] > duration_threshold)]
+    # df_filtered = df[(df['down_votes'] == 0) & (df['duration'] > duration_threshold)]
+    df_filtered = df[(df['duration'] > duration_threshold)]
 
     # Step 3: Sample 1000 males and 1000 females
-    df_male = df_filtered[df_filtered['gender'] == 'male'].sample(n=1500, random_state=42)
-    df_female = df_filtered[df_filtered['gender'] == 'female'].sample(n=1500, random_state=42)
+    # df_male = df_filtered[df_filtered['gender'] == 'male'].sample(n=1000, random_state=42)
+    # df_female = df_filtered[df_filtered['gender'] == 'female'].sample(n=1000, random_state=42)
+    df_filtered = df_filtered.sample(n=5000,random_state=42)
 
     # Combine the two
-    df_final = pd.concat([df_male, df_female]).reset_index(drop=True)
-    return df_final
+    # df_final = pd.concat([df_male, df_female]).reset_index(drop=True)
+    return df_filtered
 def preprocess_audio_batch(df_final):    
     # preprocess and extract features for the final dataset
     # loop on data fram [y] and [sr] columns and apply the function on them if not none
@@ -404,7 +447,7 @@ def preprocess_audio_batch(df_final):
 
 
 def extract_features(df_filtered):
-    output_file = 'extracted_features_2k.csv'
+    output_file = 'extracted_features_ff.csv'
     header_written = False
 
     with open(output_file, mode='w', newline='') as file:
@@ -436,8 +479,8 @@ def extract_features(df_filtered):
 # main
 def main():
     # Define file paths
-    file_path = "filtered_data_labeled.tsv"
-    audio_dir = "F:/NN project/audio_batch_8"
+    file_path = "D:/3rd/2/NN/filtered_data_labeled.tsv"
+    audio_dir = "D:/3rd/2/NN/audio_batch_4"
 
     # Step 1: Read data
     df = read_data(file_path, audio_dir)
