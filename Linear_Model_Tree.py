@@ -161,7 +161,6 @@ class LinearModelTree(BaseEstimator, ClassifierMixin):
 
         node.left = self._fit_node(X_left, y_left, depth + 1, model=best_split['model_left'])
         node.right = self._fit_node(X_right, y_right, depth + 1, model=best_split['model_right'])
-
         return node
     def fit(self, X, y):
         if(self.split_policy == 'Gain'):
