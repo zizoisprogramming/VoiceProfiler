@@ -43,12 +43,8 @@ class LinearModelTree(BaseEstimator, ClassifierMixin):
         self.base_model = base_model
         if split_policy not in ['Gain', 'Accuracy']:
             raise ValueError("split_policy must be 'Gain' or 'Accuracy'")
-        if(split_policy == 'Gain'):
-            self.split_policy = 'Gain'
-            self.split_model = None
-        else:
-            self.split_policy = 'Accuracy'
-            self.split_model = split_model
+        self.split_model = split_model
+        self.split_policy = split_policy
         self.max_depth = max_depth
         self.min_samples_leaf = min_samples_leaf
         self.min_samples_split = min_samples_split
@@ -168,6 +164,8 @@ class LinearModelTree(BaseEstimator, ClassifierMixin):
 
         return node
     def fit(self, X, y):
+        if(self.split_policy == 'Gain'):
+            self.split_model = None
         self.root = self._fit_node(X, y, 0)
         self.num_classes = len(np.unique(y))
         return self
@@ -202,40 +200,3 @@ class LinearModelTree(BaseEstimator, ClassifierMixin):
     def score(self, X, y):
         predictions = self.predict(X)
         return np.mean(predictions == y)
-
-def try_class():
-    from sklearn.datasets import make_classification
-    from sklearn.model_selection import train_test_split
-    from sklearn.linear_model import LogisticRegression, SGDClassifier
-    from sklearn.neighbors import KNeighborsClassifier
-    from sklearn.tree import DecisionTreeClassifier
-    from time import time
-    from sklearn.naive_bayes import GaussianNB
-    from sklearn.svm import SVC as SVM
-    X, y = make_classification(n_samples=2000, n_features=27, n_informative=20,
-                               n_classes=7, random_state=42)
-    X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y)
-
-    model = LinearModelTree(base_model=KNeighborsClassifier(n_neighbors=1), split_policy = 'Gain', split_model=KNeighborsClassifier(n_neighbors=1), max_depth=2, min_samples_leaf=5, min_samples_split=10)
-    curr_time = time()
-    model.fit(X_train, y_train)
-    print ("TLM RESULTS")
-    print("Training acc:", model.score(X_train, y_train))
-    print("Accuracy:", model.score(X_test, y_test))
-    print("Time taken:", time() - curr_time)
-    curr_time = time()
-    ## ----- -TREEE RESULTS ----- ###
-    print ("Tree RESULTS")
-    model = DecisionTreeClassifier(max_depth=3, min_samples_leaf=5, min_samples_split=10)
-    model.fit(X_train, y_train)
-    print("Training acc:", model.score(X_train, y_train))
-    print("Accuracy:", model.score(X_test, y_test))
-    ## ------ Random Forest ------ ####
-    print ("Random Forest RESULTS")
-    from sklearn.ensemble import RandomForestClassifier
-    model = RandomForestClassifier(max_depth=5, min_samples_leaf=5, min_samples_split=10)
-    model.fit(X_train, y_train)
-    print("Training acc:", model.score(X_train, y_train))
-    print("Accuracy:", model.score(X_test, y_test))
-    print("Total Time for the rest " + str(time() - curr_time))
-#try_class()
