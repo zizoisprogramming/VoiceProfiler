@@ -55,9 +55,6 @@ def wavelet_denoise(signal, wavelet='db8', level=4, threshold_scale=0.04):
     ]
     return pywt.waverec(denoised_coeffs, wavelet)
 
-def denoise(signal,sr):
-    return nr.reduce_noise(y=signal, sr=sr)
-
 # Pre-emphasis (step 3 preprocessing) enhancing the SNR. less used in speech recognition processing. --n4elha?
 
 def pre_emphasis(signal, coeff=0.97):
@@ -72,17 +69,23 @@ def windowing(frames, frame_length):
     window = np.hamming(frame_length)
     windowed_frames = frames * window[:, np.newaxis]
     return windowed_frames
-
+removed_counts = 0
 ## combining preprocessing steps
+def denoise(signal,sr):
+    return nr.reduce_noise(y=signal, sr=sr)
 def preprocess_audio(raw_audio, sr, frame_length, hop_length):
 
     # Step 1: VAD
+    normalization_factor = np.max(np.abs(raw_audio))
+    # Normalize the audio 
+    raw_audio /= normalization_factor
     speech_signal = apply_vad(raw_audio, sr)
 
     if speech_signal is None or len(speech_signal) == 0:
         print("VAD removed all audio; skipping.")
+        removed_counts += 1
         return None, None, None
-
+    speech_signal *= normalization_factor  # Rescale to original amplitude
     # Step 2: Denoising
     denoised_audio = denoise(speech_signal, sr)
 
@@ -154,7 +157,7 @@ def calculate_mfcc(denoised_audio, sr):
     }
 
 # Assume windowed_frames already exists from your framing+windowing step
-def calculate_pitch_and_cepstrum(windowed_frames,sr):
+def calculate_pitch_and_cepstrum(windowed_frames):
     mid_frame_idx = windowed_frames.shape[1] // 2
     windowed_frame = windowed_frames[:, mid_frame_idx]
 
@@ -215,60 +218,17 @@ def calculate_wps(duration, row):
     wps = word_count / duration
     return wps
 
-# takes 20 seconds per sample !
 def calculate_f0_features(y, sr):
-    y_harmonic, _ = librosa.effects.hpss(y)
-    # Estimate fundamental frequency (f0) using pyin
-    f0, voiced_flag, voiced_probs = librosa.pyin(y, fmin=librosa.note_to_hz('C1'), fmax=librosa.note_to_hz('C8'))
-    f0_clean = f0[~np.isnan(f0)]
-
-    # Compute features
-    f0_mean = np.mean(f0_clean)
-    f0_std = np.std(f0_clean)
-    f0_5_percentile = np.percentile(f0_clean, 5)
-    f0_95_percentile = np.percentile(f0_clean, 95)
-
+    snd = parselmouth.Sound(y, sr)
+    pitch = snd.to_pitch()
+    f0 = pitch.selected_array['frequency']
+    f0 = f0[f0 > 0]  # remove unvoiced
+    
     return {
-        'mean': f0_mean,
-        'std': f0_std,
-        '5_percentile': f0_5_percentile,
-        '95_percentile': f0_95_percentile
-    }
-
-def extract_f0_percentiles(windowed_frames, sr):
-    f0_values = []
-
-    for i in range(windowed_frames.shape[1]):
-        frame = windowed_frames[:, i]
-        spectrum = np.fft.fft(frame)
-        log_magnitude = np.log(np.abs(spectrum) + 1e-10)
-        cepstrum = np.fft.ifft(log_magnitude).real
-
-        min_q = int(sr / 400)
-        max_q = int(sr / 60)
-
-        quef_peak = np.argmax(cepstrum[min_q:max_q]) + min_q
-        pitch_period = quef_peak / sr
-        f0 = 1.0 / pitch_period
-
-        # Filter unrealistic F0s (optional)
-        if 60 <= f0 <= 400:  # Human voice range
-            f0_values.append(f0)
-
-    if len(f0_values) == 0:
-        return None, None, []
-
-    f0_values = np.array(f0_values)
-    f0_mean = np.mean(f0_values)
-    f0_std = np.std(f0_values)
-    f0_5 = np.percentile(f0_values, 5)
-    f0_95 = np.percentile(f0_values, 95)
-
-    return {
-        'mean': f0_mean,
-        'std': f0_std,
-        '5_percentile': f0_5,
-        '95_percentile': f0_95
+        'mean': np.mean(f0),
+        'std': np.std(f0),
+        '5_percentile': np.percentile(f0, 5),
+        '95_percentile': np.percentile(f0, 95)
     }
 def calculate_tempo(y, sr, duration):
     # Compute the onset envelope
@@ -305,8 +265,7 @@ def extract_features_from_audio(y, sr, row, win_frames):
     features['wps'] = calculate_wps(duration, row)  
 
     # F0
-    # f0_features = calculate_f0_features(y, sr)
-    f0_features = extract_f0_percentiles(windowed_frames=win_frames, sr=sr)
+    f0_features = calculate_f0_features(y, sr)
     features['f0_mean'] = f0_features['mean']
     features['f0_std'] = f0_features['std']
     features['f0_5_percentile'] = f0_features['5_percentile']
@@ -365,6 +324,9 @@ def read_data(file_path, audio_dir):
     # Extract base filenames from 'path' column
     df['filename'] = df['path'].apply(lambda x: os.path.basename(x))
 
+
+
+
     # Filter rows to only those where the file exists
     df = df[df['filename'].isin(available_files)]
 
@@ -399,17 +361,12 @@ def load_audios(df):
     return df
 def filter_data(df):
     duration_threshold = 2.0  
-    # df_filtered = df[(df['down_votes'] == 0) & (df['duration'] > duration_threshold)]
-    df_filtered = df[(df['duration'] > duration_threshold)]
-
-    # Step 3: Sample 1000 males and 1000 females
-    # df_male = df_filtered[df_filtered['gender'] == 'male'].sample(n=1000, random_state=42)
-    # df_female = df_filtered[df_filtered['gender'] == 'female'].sample(n=1000, random_state=42)
-    df_filtered = df_filtered.sample(n=5000,random_state=42)
-
-    # Combine the two
-    # df_final = pd.concat([df_male, df_female]).reset_index(drop=True)
+    
+    # Step 1: Filter by down_votes and duration
+    df_filtered = df[ (df['duration'] > duration_threshold)]
+    
     return df_filtered
+
 def preprocess_audio_batch(df_final):    
     # preprocess and extract features for the final dataset
     # loop on data fram [y] and [sr] columns and apply the function on them if not none
@@ -443,11 +400,13 @@ def preprocess_audio_batch(df_final):
     df_filtered['normalized_frames'] = normalized_frames
     df_filtered['windowed_frames'] = windowed_frames
     df_filtered['denoised_audios'] = denoised_audios
+
+    print("removed counts from vad" , removed_counts)
     return df_filtered
 
 
 def extract_features(df_filtered):
-    output_file = 'extracted_features_ff.csv'
+    output_file = 'oneAud.csv'
     header_written = False
 
     with open(output_file, mode='w', newline='') as file:
@@ -475,12 +434,77 @@ def extract_features(df_filtered):
 
     print(f"Saved features to {output_file}")
 
+def calculate_features(y, sr, win_frames):
+    features = {}
 
+    # Duration
+    duration = calculate_duration(y, sr)
+    features['duration'] = duration
+
+    # F0
+    f0_features = calculate_f0_features(y, sr)
+    features['f0_mean'] = f0_features['mean']
+    features['f0_std'] = f0_features['std']
+    features['f0_5_percentile'] = f0_features['5_percentile']
+    features['f0_95_percentile'] = f0_features['95_percentile']
+
+    # Tempo
+    features['tempo'] = calculate_tempo(y, sr, duration)
+
+    # Formants
+    f1, f2, f3 = calculate_formants(y, sr)
+    features['formant1'] = f1
+    features['formant2'] = f2
+    features['formant3'] = f3
+
+    # MFCCs
+    mfcc_features = calculate_mfcc(y, sr)
+
+    for i, val in enumerate(mfcc_features['mfcc_means']):
+        features[f'mfcc_{i}_mean'] = val
+    for i, val in enumerate(mfcc_features['mfcc_stds']):
+        features[f'mfcc_{i}_std'] = val
+
+    for i, val in enumerate(mfcc_features['delta_means']):
+        features[f'delta_mfcc_{i}_mean'] = val
+    for i, val in enumerate(mfcc_features['delta_stds']):
+        features[f'delta_mfcc_{i}_std'] = val
+
+    for i, val in enumerate(mfcc_features['delta2_means']):
+        features[f'delta2_mfcc_{i}_mean'] = val
+    for i, val in enumerate(mfcc_features['delta2_stds']):
+        features[f'delta2_mfcc_{i}_std'] = val
+    for i, val in enumerate(mfcc_features['mfcc_kurtosis']):
+        features[f'mfcc_{i}_kurtosis'] = val
+    for i, val in enumerate(mfcc_features['mfcc_skewness']):
+        features[f'mfcc_{i}_skewness'] = val
+
+    # Cepstrum
+    cpp_mean = compute_cpp_from_windowed(win_frames, sr)
+    features['cpp_mean'] = cpp_mean
+
+    # Short-Time Energy
+    ste_features = short_time_energy(y, sr, win_frames)
+    features['ste_mean'] = ste_features['mean_energy']
+    features['ste_std'] = ste_features['std_energy']
+    features['ste_max'] = ste_features['max_energy']
+    features['ste_min'] = ste_features['min_energy']
+    features['ste_variance'] = ste_features['energy_variance']
+    
+    return features
+
+def extract_features_per_audio(path):
+    y, sr = librosa.load(path, sr=None)
+    frame_length = int(0.025 * sr)  # 25 ms frames
+    hop_length = int(0.010 * sr)  # 10 ms hop length
+    norm_frames, win_frames, denoised_audio = preprocess_audio(y, sr, frame_length, hop_length)
+    features = calculate_features(denoised_audio, sr,win_frames)
+    return pd.DataFrame([features])
 # main
 def main():
     # Define file paths
     file_path = "D:/3rd/2/NN/filtered_data_labeled.tsv"
-    audio_dir = "D:/3rd/2/NN/audio_batch_4"
+    audio_dir = "D:/3rd/2/NN/oneAudio"
 
     # Step 1: Read data
     df = read_data(file_path, audio_dir)
@@ -493,7 +517,9 @@ def main():
     # Step 5: Extract features
     features_df = extract_features(df_filtered)
     print("Features extraction completed.")
-    print(features_df.head())
+    print(df_filtered.columns)
+    from_one_audio = extract_features_per_audio("D:/3rd/2/NN/oneAudio/common_voice_en_1459.mp3")
+    from_one_audio.to_csv("extracted_features_onne.csv", index=False)
 if __name__ == "__main__":
     main()
 
