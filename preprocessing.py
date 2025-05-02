@@ -365,7 +365,10 @@ def filter_data(df):
     # Step 1: Filter by down_votes and duration
     df_filtered = df[ (df['duration'] > duration_threshold)]
     
-    return df_filtered
+    # return df_filtered[(df_filtered['age'] == 'twenties') & (df_filtered['gender'] == 'female')]
+    return df_filtered[(df_filtered['age'] == 'fifties')]
+    # return df_filtered[(df_filtered['age'] == 'twenties') & (df_filtered['gender'] == 'male')].sample(n=1200)
+
 
 def preprocess_audio_batch(df_final):    
     # preprocess and extract features for the final dataset
@@ -406,14 +409,14 @@ def preprocess_audio_batch(df_final):
 
 
 def extract_features(df_filtered):
-    output_file = 'oneAud.csv'
+    output_file = 'b7_fifties.csv'
     header_written = False
 
     with open(output_file, mode='w', newline='') as file:
         writer = None
 
         for i in tqdm(range(len(df_filtered)), desc="Extracting features"):
-            y = df_filtered['y'].iloc[i]
+            y = df_filtered['denoised_audios'].iloc[i]
             sr = df_filtered['sr'].iloc[i]
 
             if y is not None and sr is not None:
@@ -504,7 +507,7 @@ def extract_features_per_audio(path):
 def main():
     # Define file paths
     file_path = "D:/3rd/2/NN/filtered_data_labeled.tsv"
-    audio_dir = "D:/3rd/2/NN/oneAudio"
+    audio_dir = "D:/3rd/2/NN/audio_batch_7"
 
     # Step 1: Read data
     df = read_data(file_path, audio_dir)
@@ -517,9 +520,9 @@ def main():
     # Step 5: Extract features
     features_df = extract_features(df_filtered)
     print("Features extraction completed.")
-    print(df_filtered.columns)
-    from_one_audio = extract_features_per_audio("D:/3rd/2/NN/oneAudio/common_voice_en_1459.mp3")
-    from_one_audio.to_csv("extracted_features_onne.csv", index=False)
+    # print(df_filtered.columns)
+    # from_one_audio = extract_features_per_audio("D:/3rd/2/NN/oneAudio/common_voice_en_1459.mp3")
+    # from_one_audio.to_csv("extracted_features_onne.csv", index=False)
 if __name__ == "__main__":
     main()
 
