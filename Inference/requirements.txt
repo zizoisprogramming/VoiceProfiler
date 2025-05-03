@@ -1,3 +1,10 @@
+praat-parselmouth==0.3.3
 pandas
 numpy
 scikit-learn
+librosa
+vad
+noisereduce
+PyWavelets
+seaborn
+xgboost

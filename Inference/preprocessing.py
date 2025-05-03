@@ -530,7 +530,7 @@ def extract_features_per_audio(path):
     frame_length = int(0.025 * sr)  # 25 ms frames
     hop_length = int(0.010 * sr)  # 10 ms hop length
     norm_frames, win_frames, denoised_audio = preprocess_audio(y, sr, frame_length, hop_length)
-    features = calculate_features(denoised_audio, sr, win_frames)
+    features = calculate_features(y, sr, win_frames)
     return pd.DataFrame([features])
 
 
