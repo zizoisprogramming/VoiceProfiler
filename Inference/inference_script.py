@@ -4,8 +4,6 @@ import pandas as pd
 import numpy as np
 import sys
 import os
-parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-sys.path.append(parent_dir)
 from preprocessing import *
 from cleaning import clean_df
 def normalize_test(X_test, transformations):
@@ -68,13 +66,13 @@ def pipeline(test_file = None, results_file = None):
         df['age'] = df['age'].map({'twenties': 0, 'fifties': 1, 0: 0, 1: 1})
         y = df['gender'] + 2 * df['age']
         df = df.drop(columns = ['age', 'gender'])
-        y.to_csv('results.csv', index=False)
+        y.to_csv(results_file, index=False)
     df = clean_df(df)   ## select features
     df = transform_features(df) ## transformations
     df.to_csv('test_data.csv', index=False)
 
-    predict("test_data.csv", "91.pkl", "results.txt", results_file)
+    predict("test_data.csv", "model.pkl", "results.txt", results_file)
 
 if __name__ == "__main__":
     pipeline()
-    #pipeline('testing.csv', 'results.csv')
+    #pipeline('testing.csv', 'actual.csv')
